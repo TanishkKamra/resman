@@ -58,3 +58,7 @@ This runs the logic tests in `tests\LogicTests.cs` and builds `build\ResMan.exe`
 ## Uninstall
 
 Untick *Start with Windows*, choose **Exit** from the tray menu, then delete `ResMan.exe` and `%APPDATA%\ResMan`.
+
+## License
+
+[MIT](LICENSE)
