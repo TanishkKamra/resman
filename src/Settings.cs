@@ -13,6 +13,7 @@ namespace ResMan
         public string Name = "";
         public int Width, Height, Refresh;
         public Scaling Scaling = Scaling.Keep;
+        public string Hotkey = "";       // e.g. "Ctrl+Alt+1"; empty = none
 
         public string Describe()
         {
@@ -34,6 +35,8 @@ namespace ResMan
     {
         public string Monitor = "";      // empty = primary
         public string QuickPreset = "";  // preset the left-click toggle uses
+        public string ToggleHotkey = ""; // same as left-click; empty = none
+        public string NativeHotkey = ""; // back to native; empty = none
         public List<Preset> Presets = new List<Preset>();
         public List<AppRule> Apps = new List<AppRule>();
 
@@ -59,7 +62,8 @@ namespace ResMan
                     new XAttribute("Width", p.Width),
                     new XAttribute("Height", p.Height),
                     new XAttribute("Refresh", p.Refresh),
-                    new XAttribute("Scaling", p.Scaling.ToString())));
+                    new XAttribute("Scaling", p.Scaling.ToString()),
+                    new XAttribute("Hotkey", p.Hotkey)));
 
             var apps = new XElement("Apps");
             foreach (AppRule a in Apps)
@@ -69,6 +73,8 @@ namespace ResMan
                 new XAttribute("Version", 1),
                 new XElement("Monitor", Monitor),
                 new XElement("QuickPreset", QuickPreset),
+                new XElement("ToggleHotkey", ToggleHotkey),
+                new XElement("NativeHotkey", NativeHotkey),
                 presets, apps);
         }
 
@@ -79,6 +85,9 @@ namespace ResMan
             var s = new AppSettings();
             s.Monitor = (string)root.Element("Monitor") ?? "";
             s.QuickPreset = (string)root.Element("QuickPreset") ?? "";
+            // An unusable hotkey is dropped rather than failing the whole file.
+            s.ToggleHotkey = KeyCombo.Normalize((string)root.Element("ToggleHotkey"));
+            s.NativeHotkey = KeyCombo.Normalize((string)root.Element("NativeHotkey"));
 
             XElement presets = root.Element("Presets");
             if (presets != null)
@@ -92,6 +101,7 @@ namespace ResMan
                     Scaling sc;
                     if (!Enum.TryParse(Attr(e, "Scaling"), true, out sc)) sc = Scaling.Keep;
                     p.Scaling = sc;
+                    p.Hotkey = KeyCombo.Normalize(Attr(e, "Hotkey"));
                     s.Presets.Add(p);
                 }
 

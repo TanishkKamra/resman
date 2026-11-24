@@ -9,7 +9,7 @@ New-Item -ItemType Directory -Force -Path build | Out-Null
 $common = @('-nologo', '-codepage:65001', '-warn:4', '-warnaserror+', '-optimize+',
             '-r:System.dll', '-r:System.Xml.dll', '-r:System.Xml.Linq.dll', '-r:System.Core.dll')
 
-& $csc @common '-out:build\LogicTests.exe' 'tests\LogicTests.cs' 'src\AutoSwitch.cs' 'src\Settings.cs'
+& $csc @common '-r:System.Windows.Forms.dll' '-out:build\LogicTests.exe' 'tests\LogicTests.cs' 'src\AutoSwitch.cs' 'src\Settings.cs' 'src\Hotkey.cs'
 if ($LASTEXITCODE -ne 0) { throw 'Test build failed.' }
 & '.\build\LogicTests.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
