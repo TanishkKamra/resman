@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace ResMan
@@ -13,11 +14,12 @@ namespace ResMan
         public AppSettings Result { get; private set; }
 
         static readonly string[] ScalingLabels = { "Keep current", "Stretch to fill", "Black bars" };
-        const int ColName = 0, ColWidth = 1, ColHeight = 2, ColHz = 3, ColScaling = 4;
+        const int ColName = 0, ColWidth = 1, ColHeight = 2, ColHz = 3, ColScaling = 4, ColHotkey = 5;
         const int ColExe = 0, ColPreset = 1;
 
         readonly ComboBox monitorBox, quickBox, addModeBox;
         readonly CheckBox autostartBox;
+        readonly HotkeyBox toggleKeyBox, nativeKeyBox, presetKeyBox;
         readonly DataGridView presetGrid, appGrid;
         readonly DataGridViewComboBoxColumn appPresetCol;
         readonly Label hintLabel;
@@ -32,8 +34,8 @@ namespace ResMan
             Text = "ResMan settings";
             Icon = icon;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(720, 520);
-            MinimumSize = new Size(600, 440);
+            ClientSize = new Size(720, 580);
+            MinimumSize = new Size(600, 500);
 
             var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(12) };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -51,8 +53,17 @@ namespace ResMan
             head.Controls.Add(monitorBox, 1, 0);
             head.Controls.Add(FieldLabel("&Left-click switches to"), 0, 1);
             head.Controls.Add(quickBox, 1, 1);
+            toggleKeyBox = new HotkeyBox("Toggle hotkey");
+            nativeKeyBox = new HotkeyBox("Native hotkey");
+            toggleKeyBox.Check = delegate (KeyCombo k) { return CheckHotkey(k, toggleKeyBox); };
+            nativeKeyBox.Check = delegate (KeyCombo k) { return CheckHotkey(k, nativeKeyBox); };
+            var keysHint = new Label { Text = "Click a box, then press the keys. Backspace clears.", AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(6, 6, 0, 0) };
+            head.Controls.Add(FieldLabel("&Toggle hotkey"), 0, 2);
+            head.Controls.Add(KeyRow(toggleKeyBox, keysHint), 1, 2);
+            head.Controls.Add(FieldLabel("&Native hotkey"), 0, 3);
+            head.Controls.Add(KeyRow(nativeKeyBox), 1, 3);
             autostartBox = new CheckBox { Text = "&Start ResMan with Windows", AutoSize = true, Checked = Autostart.IsEnabled, Margin = new Padding(0, 6, 0, 0) };
-            head.Controls.Add(autostartBox, 1, 2);
+            head.Controls.Add(autostartBox, 1, 4);
             root.Controls.Add(head, 0, 0);
 
             var tabs = new TabControl { Dock = DockStyle.Fill };
@@ -68,6 +79,9 @@ namespace ResMan
             var scalingCol = new DataGridViewComboBoxColumn { HeaderText = "Scaling", FillWeight = 26, FlatStyle = FlatStyle.Flat };
             scalingCol.Items.AddRange(ScalingLabels);
             presetGrid.Columns.Add(scalingCol);
+            DataGridViewTextBoxColumn hotkeyCol = TextCol("Hotkey", 24);
+            hotkeyCol.ReadOnly = true; // set with the recorder below the grid
+            presetGrid.Columns.Add(hotkeyCol);
             presetGrid.CellBeginEdit += delegate (object s, DataGridViewCellCancelEventArgs e)
             {
                 if (e.ColumnIndex == ColName) nameBeforeEdit = Cell(presetGrid.Rows[e.RowIndex], ColName);
@@ -85,8 +99,21 @@ namespace ResMan
             var addCustom = Button("Add &custom", OnAddCustom);
             var removePreset = Button("&Remove", delegate { RemoveCurrent(presetGrid); RefreshPresetNames(null, null); });
             var preview = Button("&Preview", OnPreview);
+            presetKeyBox = new HotkeyBox("Hotkey for the selected preset");
+            presetKeyBox.Check = delegate (KeyCombo k) { return CheckHotkey(k, presetKeyBox); };
+            presetKeyBox.ValueChanged += delegate
+            {
+                if (presetGrid.CurrentRow != null) presetGrid.CurrentRow.Cells[ColHotkey].Value = presetKeyBox.Value.ToString();
+            };
+            presetGrid.CurrentCellChanged += delegate { SyncPresetKeyBox(); };
+            presetGrid.CellClick += delegate (object s, DataGridViewCellEventArgs e)
+            {
+                if (e.ColumnIndex == ColHotkey && e.RowIndex >= 0) presetKeyBox.Focus();
+            };
+            var presetKeyLabel = new Label { Text = "&Hotkey for selected preset", AutoSize = true, Margin = new Padding(0, 6, 8, 0) };
             hintLabel = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(0, 6, 0, 0), MaximumSize = new Size(660, 0) };
-            presetsPage.Controls.Add(Stack(presetGrid, Row(addModeBox, addCustom, removePreset, preview), hintLabel));
+            presetsPage.Controls.Add(Stack(presetGrid, Row(addModeBox, addCustom, removePreset, preview),
+                Row(presetKeyLabel, KeyRow(presetKeyBox)), hintLabel));
             tabs.TabPages.Add(presetsPage);
 
             // Apps tab
@@ -125,12 +152,15 @@ namespace ResMan
             FillModes();
 
             foreach (Preset p in current.Presets)
-                presetGrid.Rows.Add(p.Name, p.Width.ToString(), p.Height.ToString(), p.Refresh > 0 ? p.Refresh.ToString() : "", ScalingLabels[(int)p.Scaling]);
+                presetGrid.Rows.Add(p.Name, p.Width.ToString(), p.Height.ToString(), p.Refresh > 0 ? p.Refresh.ToString() : "", ScalingLabels[(int)p.Scaling], p.Hotkey);
             RefreshPresetNames(null, null);
             foreach (AppRule a in current.Apps)
                 appGrid.Rows.Add(a.Exe, appPresetCol.Items.Contains(a.Preset) ? a.Preset : null);
             Preset quick = current.QuickOrFirst();
             if (quick != null) quickBox.SelectedItem = quick.Name;
+            toggleKeyBox.Value = Combo(current.ToggleHotkey);
+            nativeKeyBox.Value = Combo(current.NativeHotkey);
+            SyncPresetKeyBox();
 
             ResumeLayout(true);
         }
@@ -156,17 +186,30 @@ namespace ResMan
             return f;
         }
 
-        static TableLayoutPanel Stack(Control fill, Control buttons, Control hint)
+        static TableLayoutPanel Stack(Control fill, params Control[] below)
         {
-            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+            var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = below.Length + 1 };
             t.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             fill.Dock = DockStyle.Fill;
             t.Controls.Add(fill, 0, 0);
-            t.Controls.Add(buttons, 0, 1);
-            t.Controls.Add(hint, 0, 2);
+            for (int i = 0; i < below.Length; i++)
+            {
+                t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                t.Controls.Add(below[i], 0, i + 1);
+            }
             return t;
+        }
+
+        // A hotkey box with its Clear button (and an optional hint after it).
+        static FlowLayoutPanel KeyRow(HotkeyBox box, params Control[] after)
+        {
+            var clear = Button("Clear", delegate { box.Value = new KeyCombo(); });
+            clear.AccessibleName = "Clear " + box.AccessibleName;
+            var f = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 2) };
+            f.Controls.Add(box);
+            f.Controls.Add(clear);
+            f.Controls.AddRange(after);
+            return f;
         }
 
         static DataGridView MakeGrid(string name)
@@ -242,7 +285,7 @@ namespace ResMan
         void AddPresetRow(string name, string w, string h, string hz)
         {
             presetGrid.EndEdit();
-            int i = presetGrid.Rows.Add(name, w, h, hz, ScalingLabels[0]);
+            int i = presetGrid.Rows.Add(name, w, h, hz, ScalingLabels[0], "");
             presetGrid.CurrentCell = presetGrid.Rows[i].Cells[ColName];
             RefreshPresetNames(null, null);
         }
@@ -305,6 +348,7 @@ namespace ResMan
                 return Invalid(presetGrid, r, ColHz, "Refresh rate must be a number of Hz (or blank for any).");
             int sc = Array.IndexOf(ScalingLabels, r.Cells[ColScaling].Value as string);
             p.Scaling = sc < 0 ? Scaling.Keep : (Scaling)sc;
+            p.Hotkey = Cell(r, ColHotkey);
             return p;
         }
 
@@ -313,6 +357,37 @@ namespace ResMan
             ((TabControl)g.Parent.Parent.Parent).SelectedTab = (TabPage)g.Parent.Parent;
             g.CurrentCell = r.Cells[col];
             MessageBox.Show(this, message, "ResMan", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return null;
+        }
+
+        // ---------- hotkeys ----------
+
+        static KeyCombo Combo(string text)
+        {
+            KeyCombo k;
+            KeyCombo.TryParse(text, out k); // stored text is already normalized; anything else reads as none
+            return k;
+        }
+
+        void SyncPresetKeyBox()
+        {
+            DataGridViewRow r = presetGrid.CurrentRow;
+            presetKeyBox.Enabled = r != null;
+            presetKeyBox.Value = r == null ? new KeyCombo() : Combo(Cell(r, ColHotkey));
+        }
+
+        // Why a recorded hotkey can't be used, or null when it can.
+        string CheckHotkey(KeyCombo k, HotkeyBox recording)
+        {
+            string text = k.ToString();
+            if (recording != toggleKeyBox && toggleKeyBox.Value.ToString() == text) return text + " is already the toggle hotkey.";
+            if (recording != nativeKeyBox && nativeKeyBox.Value.ToString() == text) return text + " is already the Native hotkey.";
+            foreach (DataGridViewRow r in presetGrid.Rows)
+            {
+                if (recording == presetKeyBox && r == presetGrid.CurrentRow) continue;
+                if (Cell(r, ColHotkey) == text) return text + " is already the hotkey for " + Cell(r, ColName) + ".";
+            }
+            if (!HotkeyHost.IsFree(k)) return "Another app (or Windows) already uses " + text + ". Try a different one.";
             return null;
         }
 
@@ -391,6 +466,8 @@ namespace ResMan
                 return;
             }
             s.QuickPreset = (quickBox.SelectedItem as string) ?? s.Presets[0].Name;
+            s.ToggleHotkey = toggleKeyBox.Value.ToString();
+            s.NativeHotkey = nativeKeyBox.Value.ToString();
 
             var exes = new HashSet<string>();
             foreach (DataGridViewRow r in appGrid.Rows)
@@ -424,6 +501,120 @@ namespace ResMan
             if (autostartBox.Checked != Autostart.IsEnabled) Autostart.Set(autostartBox.Checked);
             Result = s;
             Close();
+        }
+    }
+
+    // Records a hotkey: click it, then press the combination. Esc keeps the old value, Backspace or Delete clears it.
+    class HotkeyBox : TextBox
+    {
+        [DllImport("user32.dll")]
+        static extern short GetKeyState(int vk);
+        const int VK_LWIN = 0x5B, VK_RWIN = 0x5C;
+
+        readonly ToolTip tip = new ToolTip();
+        KeyCombo value;
+
+        public event EventHandler ValueChanged;
+        public Func<KeyCombo, string> Check; // returns why a combination can't be used, or null
+
+        public HotkeyBox(string accessibleName)
+        {
+            AccessibleName = accessibleName;
+            ReadOnly = true;
+            ShortcutsEnabled = false;
+            BackColor = SystemColors.Window;
+            Width = 170;
+            Margin = new Padding(0, 0, 6, 0);
+            ShowValue();
+        }
+
+        public KeyCombo Value
+        {
+            get { return value; }
+            set
+            {
+                bool changed = value.ToString() != this.value.ToString();
+                this.value = value;
+                ShowValue();
+                if (changed && ValueChanged != null) ValueChanged(this, EventArgs.Empty);
+            }
+        }
+
+        static uint HeldModifiers()
+        {
+            Keys held = ModifierKeys;
+            uint m = 0;
+            if ((held & Keys.Control) != 0) m |= KeyCombo.Ctrl;
+            if ((held & Keys.Alt) != 0) m |= KeyCombo.Alt;
+            if ((held & Keys.Shift) != 0) m |= KeyCombo.Shift;
+            if (GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0) m |= KeyCombo.Win;
+            return m;
+        }
+
+        void ShowValue()
+        {
+            if (value.IsEmpty)
+            {
+                Text = Focused ? "Press a shortcut…" : "None";
+                ForeColor = SystemColors.GrayText;
+            }
+            else
+            {
+                Text = value.ToString();
+                ForeColor = SystemColors.WindowText;
+            }
+        }
+
+        // Sees every key press (Alt combinations included) before the form's mnemonics and buttons do.
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            Keys key = keyData & Keys.KeyCode;
+            uint mods = HeldModifiers();
+            bool plain = (mods & ~KeyCombo.Shift) == 0;
+            if (plain && (key == Keys.Tab || key == Keys.Enter)) return base.ProcessCmdKey(ref msg, keyData); // move on / Save
+            if (mods == 0 && key == Keys.Escape) { ShowValue(); return true; }
+            if (mods == 0 && (key == Keys.Back || key == Keys.Delete)) { Value = new KeyCombo(); return true; }
+
+            if (KeyCombo.IsModifierKey(key))
+            {
+                Text = KeyCombo.ModifierText(mods) + "+…";
+                ForeColor = SystemColors.WindowText;
+                return true;
+            }
+            var combo = new KeyCombo(mods, key);
+            if (!combo.IsValid) { Say("Hold Ctrl, Alt or Win, then press a key."); return true; }
+            string problem = Check == null ? null : Check(combo);
+            if (problem != null) { Say(problem); return true; }
+            Value = combo;
+            return true;
+        }
+
+        void Say(string message)
+        {
+            ShowValue();
+            tip.Show(message, this, 0, Height + 2, 4000);
+        }
+
+        protected override void OnKeyUp(KeyEventArgs e)
+        {
+            if (HeldModifiers() == 0) ShowValue();
+            e.Handled = true;
+            base.OnKeyUp(e);
+        }
+
+        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); ShowValue(); }
+
+        protected override void OnLostFocus(EventArgs e)
+        {
+            base.OnLostFocus(e);
+            tip.Hide(this);
+            ShowValue();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) tip.Dispose();
+            base.Dispose(disposing);
         }
     }
 

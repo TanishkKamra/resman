@@ -74,6 +74,7 @@ namespace ResMan
         readonly ContextMenuStrip menu;
         readonly System.Windows.Forms.Timer timer;
         readonly AutoSwitchLogic logic = new AutoSwitchLogic();
+        readonly HotkeyHost hotkeys = new HotkeyHost();
         AppSettings settings;
         SettingsForm settingsForm;
         Icon iconNative, iconSwitched;
@@ -95,6 +96,7 @@ namespace ResMan
             MakeIcons();
             UpdateTray();
             tray.Visible = true;
+            RegisterHotkeys();
 
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
@@ -158,6 +160,49 @@ namespace ResMan
             Preset p = settings.QuickOrFirst();
             if (p == null) { ShowSettings(); return; }
             ApplyPreset(m, p);
+        }
+
+        void GoNative()
+        {
+            MonitorInfo m = Monitor();
+            if (m == null) { Warn("No active monitor found."); return; }
+            RestoreNative(m);
+        }
+
+        void SwitchTo(Preset p)
+        {
+            MonitorInfo m = Monitor();
+            if (m == null) { Warn("No active monitor found."); return; }
+            ApplyPreset(m, p);
+        }
+
+        // Unusable or clashing hotkeys are reported once, so a silent key never leaves the user guessing.
+        void RegisterHotkeys()
+        {
+            hotkeys.Clear();
+            var taken = new List<string>();
+            AddHotkey(settings.ToggleHotkey, Toggle, taken);
+            AddHotkey(settings.NativeHotkey, GoNative, taken);
+            foreach (Preset p in settings.Presets)
+            {
+                Preset preset = p;
+                AddHotkey(p.Hotkey, delegate { SwitchTo(preset); }, taken);
+            }
+            if (taken.Count > 0)
+                Warn("Another app already uses " + string.Join(", ", taken.ToArray()) +
+                    ", so ResMan can't use " + (taken.Count == 1 ? "it" : "them") + ". Pick a different hotkey in Settings.");
+        }
+
+        void AddHotkey(string text, Action action, List<string> taken)
+        {
+            KeyCombo combo;
+            if (!KeyCombo.TryParse(text, out combo) || combo.IsEmpty) return;
+            if (!hotkeys.Add(combo, action)) taken.Add(combo.ToString());
+        }
+
+        static string WithHotkey(string description, string hotkey)
+        {
+            return string.IsNullOrEmpty(hotkey) ? description : description + "    " + hotkey;
         }
 
         bool ApplyPreset(MonitorInfo m, Preset p)
@@ -236,7 +281,7 @@ namespace ResMan
                 menu.Items.Add(new ToolStripMenuItem(m.ToString()) { Enabled = false });
                 menu.Items.Add(new ToolStripSeparator());
 
-                var native = new ToolStripMenuItem("Native") { Checked = atNative, ShortcutKeyDisplayString = m.Native.ToString() };
+                var native = new ToolStripMenuItem("Native") { Checked = atNative, ShortcutKeyDisplayString = WithHotkey(m.Native.ToString(), settings.NativeHotkey) };
                 native.Click += delegate { RestoreNative(m); };
                 menu.Items.Add(native);
 
@@ -247,7 +292,7 @@ namespace ResMan
                     var item = new ToolStripMenuItem(p.Name)
                     {
                         Checked = !atNative && cur.Matches(p.Width, p.Height, p.Refresh),
-                        ShortcutKeyDisplayString = p.Describe()
+                        ShortcutKeyDisplayString = WithHotkey(p.Describe(), p.Hotkey)
                     };
                     if (p == quick) item.Font = new Font(item.Font, FontStyle.Bold);
                     item.Click += delegate { ApplyPreset(m, preset); };
@@ -276,6 +321,8 @@ namespace ResMan
         void ShowSettings()
         {
             if (settingsForm != null) { settingsForm.Activate(); return; }
+            // Hotkeys are released while Settings is open, so they can be recorded and checked there.
+            hotkeys.Clear();
             settingsForm = new SettingsForm(settings, iconNative);
             settingsForm.FormClosed += delegate
             {
@@ -287,6 +334,7 @@ namespace ResMan
                 }
                 settingsForm.Dispose();
                 settingsForm = null;
+                RegisterHotkeys();
             };
             settingsForm.Show();
             settingsForm.Activate();
@@ -383,7 +431,8 @@ namespace ResMan
             }
             SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
             SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
-            if (settingsForm != null) settingsForm.Close();
+            if (settingsForm != null) settingsForm.Close(); // re-registers hotkeys, so dispose them after
+            hotkeys.Dispose();
             tray.Visible = false;
             tray.Dispose();
             iconNative.Dispose();

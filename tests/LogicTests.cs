@@ -109,6 +109,41 @@ static class LogicTests
         catch (FormatException) { threw = true; }
         Check(threw, "non-numeric width is rejected");
 
+        // Hotkey text: parse, validate and print in one canonical form
+        KeyCombo k;
+        Check(KeyCombo.TryParse(" ctrl + alt + r ", out k) && k.ToString() == "Ctrl+Alt+R", "hotkey parses loosely, prints canonically");
+        Check(KeyCombo.TryParse("Win+Shift+Control+F9", out k) && k.ToString() == "Ctrl+Shift+Win+F9", "hotkey modifiers print in fixed order");
+        Check(KeyCombo.TryParse("Ctrl+Alt+1", out k) && k.Key == System.Windows.Forms.Keys.D1 && k.ToString() == "Ctrl+Alt+1", "digit keys use plain names");
+        Check(KeyCombo.TryParse("Alt+Num 5", out k) && k.Key == System.Windows.Forms.Keys.NumPad5, "numpad keys parse");
+        Check(KeyCombo.TryParse("Ctrl+Alt+=", out k) && k.Key == System.Windows.Forms.Keys.Oemplus && k.ToString() == "Ctrl+Alt+=", "symbol keys round-trip");
+        Check(KeyCombo.TryParse("Ctrl+Num Plus", out k) && k.Key == System.Windows.Forms.Keys.Add, "numpad plus has a name without '+'");
+        Check(KeyCombo.TryParse("Ctrl+PageDown", out k) && k.ToString() == "Ctrl+PageDown", "PageDown keeps its name");
+        Check(KeyCombo.TryParse("", out k) && k.IsEmpty && k.ToString() == "", "empty text means no hotkey");
+        Check(!KeyCombo.TryParse("R", out k), "hotkey without a modifier is rejected");
+        Check(!KeyCombo.TryParse("Shift+R", out k), "Shift alone is not enough");
+        Check(!KeyCombo.TryParse("Ctrl+Alt", out k), "modifiers without a key are rejected");
+        Check(!KeyCombo.TryParse("Ctrl+Banana", out k), "unknown key is rejected");
+        Check(!KeyCombo.TryParse("Ctrl+65", out k), "numeric key code is rejected");
+        Check(!KeyCombo.TryParse("Ctrl+R+T", out k), "two keys are rejected");
+        Check(!KeyCombo.TryParse("Ctrl+ControlKey", out k), "a modifier as the key is rejected");
+        Check(!new KeyCombo(KeyCombo.Ctrl, System.Windows.Forms.Keys.ShiftKey).IsValid, "modifier-only combo is not valid");
+        Check(new KeyCombo(KeyCombo.Win, System.Windows.Forms.Keys.F1).IsValid, "Win plus a key is valid");
+
+        // Hotkeys in settings
+        s.ToggleHotkey = "Ctrl+Alt+R";
+        s.NativeHotkey = "Ctrl+Alt+N";
+        s.Presets[0].Hotkey = "Ctrl+Alt+1";
+        back = s.Clone();
+        Check(back.ToggleHotkey == "Ctrl+Alt+R" && back.NativeHotkey == "Ctrl+Alt+N", "settings: toggle and native hotkeys survive");
+        Check(back.Presets[0].Hotkey == "Ctrl+Alt+1" && back.Presets[1].Hotkey == "", "settings: preset hotkeys survive");
+        back = AppSettings.FromXml(System.Xml.Linq.XElement.Parse(
+            "<ResMan><ToggleHotkey>alt+f2</ToggleHotkey><NativeHotkey>nonsense</NativeHotkey>" +
+            "<Presets><Preset Name='x' Width='1' Height='1' Refresh='1' Hotkey='R'/></Presets></ResMan>"));
+        Check(back.ToggleHotkey == "Alt+F2", "settings: hotkey text is normalized on load");
+        Check(back.NativeHotkey == "" && back.Presets[0].Hotkey == "", "settings: invalid hotkeys load as none");
+        back = AppSettings.FromXml(System.Xml.Linq.XElement.Parse("<ResMan><QuickPreset>x</QuickPreset></ResMan>"));
+        Check(back.ToggleHotkey == "" && back.NativeHotkey == "", "settings: 1.0 files load with no hotkeys");
+
         Console.WriteLine(failures == 0 ? "\nAll tests passed." : "\n" + failures + " test(s) failed.");
         return failures == 0 ? 0 : 1;
     }

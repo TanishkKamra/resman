@@ -4,6 +4,7 @@ A tiny Windows tray app (about 50 KB, nothing to install) that switches your mon
 
 - **Left-click** the tray icon to toggle between native and your chosen preset.
 - **Right-click** to pick any preset, go back to native, open Settings, toggle *Start with Windows*, or exit.
+- **Custom hotkeys**: set your own global shortcuts to toggle (like a left-click), go back to native, or jump to any preset. None are set until you choose them.
 - **Per-app presets**: when a listed program starts, ResMan applies its preset. About 2 seconds after the program closes, the monitor goes back to native.
 - **Status at a glance**: the icon is green at native and orange while switched.
 - **Safe by design**: changes are temporary and never saved to Windows settings, so a restart or sign-out always brings back your normal resolution. *Preview* goes back to native on its own after 15 seconds, even if the screen goes blank.
@@ -17,7 +18,8 @@ Windows 10 or 11. It uses .NET Framework 4.8, which is built into Windows.
 1. Run `ResMan.exe` (download it from Releases, or build it as shown below). On first run it turns on *Start with Windows* and opens Settings. You can untick that in Settings or in the tray menu.
 2. **Presets** tab: use *Add a supported mode…* or *Add custom*, choose a scaling option, and click *Preview* to check it.
 3. **Apps** tab: start your game, then use *Add running app…* (or *Browse for .exe…*) and pick a preset for it.
-4. Choose which preset the left-click switches to, then click **Save**.
+4. Optional: click a hotkey box (Toggle, Native, or *Hotkey for selected preset*) and press a shortcut such as `Ctrl+Alt+R`. It needs Ctrl, Alt or Win; Backspace clears it. ResMan tells you if another app already uses that shortcut.
+5. Choose which preset the left-click switches to, then click **Save**.
 
 ### Custom resolutions (e.g. 1440×1080 stretched)
 
@@ -52,6 +54,7 @@ This runs the logic tests in `tests\LogicTests.cs` and builds `build\ResMan.exe`
 | `src\Display.cs` | Windows display API wrapper (list modes, apply, test, restore) |
 | `src\AutoSwitch.cs` | Decides when a watched app started or stopped (pure logic, unit-tested) |
 | `src\Settings.cs` | Presets, app rules and XML load/save |
+| `src\Hotkey.cs` | Hotkey parsing (unit-tested) and global hotkey registration |
 | `src\TrayApp.cs` | Tray icon, menu, app watcher, autostart |
 | `src\SettingsForm.cs` | Settings window, preview dialog and running-app picker |
 
